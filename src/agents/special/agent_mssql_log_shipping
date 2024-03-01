@@ -1,0 +1,299 @@
+#!/usr/bin/env python3
+# -*- encoding: utf-8; py-indent-offset: 4 -*-
+"""Checkmk special agent for MSSQL Log Shipping"""
+import base64
+import datetime
+from enum import Enum
+import time
+from typing import Any, NoReturn, Tuple, List, Dict, Optional
+import sys
+import argparse
+import uuid
+import pymssql
+import json
+import logging
+import zlib
+import concurrent.futures
+
+
+_step_process = ''
+_logger = logging.getLogger(__name__)
+
+
+def map_one_result(columns: Tuple, data: Tuple[Any, ...]) -> Dict:
+    global _step_process
+    _step_process = 'processing result and types'
+    return {col[0]: (col[1](value) if col[1] else value) for col, value in zip(columns, data)}
+
+
+def map_many_results(columns: Tuple, list: List[Tuple[Any, ...]]) -> Dict:
+    return [map_one_result(columns, item) for item in list]
+
+
+def uuid_to_str(uuid: uuid.UUID) -> str:
+    return str(uuid)
+
+
+def decode_utf8(data: bytes) -> str:
+    return data.decode('utf-8')
+
+
+def datetime_to_iso(dt: datetime.datetime) -> str:
+    return dt.isoformat()
+
+
+VERSION = '0.0.1'
+DEFAULT_MSSQL_PORT = 1433
+QUERY = {
+    'get_primary_status': {
+        'query': "select isnull((select serverproperty('InstanceName')), 'MSSQLSERVER') AS instance_name, primary_database, last_backup_file, last_backup_date, last_backup_date_utc from log_shipping_monitor_primary;",
+        'columns': [
+            ('instance_name', decode_utf8),
+            ('primary_database', None),
+            ('last_backup_file', None),
+            ('last_backup_date', datetime_to_iso),
+            ('last_backup_date_utc', datetime_to_iso)
+        ]
+    },
+    'get_secondary_status': {
+        'query': "select isnull((select serverproperty('InstanceName')), 'MSSQLSERVER') AS instance_name, secondary_database, last_copied_file, last_copied_date, last_copied_date_utc, last_restored_file, last_restored_date, last_restored_date_utc from log_shipping_monitor_secondary;",
+        'columns': [
+            ('instance_name', decode_utf8),
+            ('secondary_database', None),
+            ('last_copied_file', None),
+            ('last_copied_date', datetime_to_iso),
+            ('last_copied_date_utc', datetime_to_iso),
+            ('last_restored_file', None),
+            ('last_restored_date', datetime_to_iso),
+            ('last_restored_date_utc', datetime_to_iso)
+        ]
+    },
+    'get_jobs': {
+        'query': "select sj.job_id, sj.name as job_name, sj.enabled as job_enabled, sjs.next_run_date as next_run_date, sjs.next_run_time as next_run_time, sjserver.last_run_outcome, sjserver.last_outcome_message, sjserver.last_run_date as last_run_date, sjserver.last_run_time as last_run_time, sjserver.last_run_duration, ss.enabled as schedule_enabled from dbo.sysjobs sj left join dbo.sysjobschedules sjs on sj.job_id = sjs.job_id left join dbo.sysjobservers sjserver on sj.job_id = sjserver.job_id left join dbo.sysschedules ss on sjs.schedule_id = ss.schedule_id order by sj.name, sjs.next_run_date asc, sjs.next_run_time asc;",
+        'columns': [
+            ('id', uuid_to_str),
+            ('name', None),
+            ('enabled', None),
+            ('next_run_date', None),
+            ('next_run_time', None),
+            ('last_run_outcome', None),
+            ('last_outcome_message', None),
+            ('last_run_date', None),
+            ('last_run_time', None),
+            ('last_run_duration', None),
+            ('schedule_enabled', None)
+        ]
+    },
+    'get_server_current_time': {
+        'query': "select cast(sysdatetime() as datetime) as server_current_time;",
+        'columns': [
+            ('server_current_time', datetime_to_iso),
+        ]
+    }
+}
+
+
+class DbType(Enum):
+    PRIMARY = 'primary'
+    SECONDARY = 'secondary'
+
+
+def hostaddress_tuple(hostaddress: str) -> Tuple[str, int]:
+    if ':' in hostaddress:
+        host, port = hostaddress.split(':')
+    else:
+        host = hostaddress
+        port = DEFAULT_MSSQL_PORT
+    port = validate_tcp_port(port)
+    if not host or not port:
+        raise argparse.ArgumentTypeError(f"{hostaddress} is an invalid address port pair. Must be 'address:port'")
+    return host, port
+
+
+def validate_tcp_port(port: str) -> int:
+    min_port = 1
+    max_port = 65535
+    iport = int(port)
+    if iport < min_port or iport > max_port:
+        raise argparse.ArgumentTypeError(f"{port} is an invalid port number. Must be between {min_port} and {max_port}")
+    return iport
+
+
+def positive_int(value):
+    ivalue = int(value)
+    if ivalue < 0:
+        raise argparse.ArgumentTypeError(f"{value} is not a non-negative integer")
+    return ivalue
+
+
+def logging_setup(verbose: int = 0) -> None:
+    fmt = "%(message)s"
+    if verbose > 1:
+        fmt = "[ %(asctime)s ] %(levelname)s: %(lineno)s: " + fmt
+    logging.basicConfig(level=max(30 - 10 * verbose, 0), format=fmt)
+
+
+def parse_arguments(argv: Optional[List[str]] = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('-u', '--user', type=str, required=True, help='Database user to connect as')
+    parser.add_argument('-p', '--password', type=str, required=True, help="User's password")
+    parser.add_argument('-t', '--timeout', type=positive_int, default=0, help='Query timeout in seconds, default 0 (no timeout)')
+    parser.add_argument('-l', '--login-timeout', type=positive_int, default=60, dest='login_timeout', help='Timeout for connection and login in seconds, default 60')
+    parser.add_argument('-d', '--debug', action='store_true', help='Debug mode: let Python exceptions come through')
+    parser.add_argument('-v', '--verbose', action='count', default=0, help='Verbose mode (for even more output use -vv)')
+    parser.add_argument('-V', '--version', action='version', version=f"v{VERSION}")
+    parser.add_argument('primary', type=hostaddress_tuple, metavar='PRIMARY-ADDRESS[:PORT]', help='Hostname or IP-Address and port(Optional) where the primary database is located')
+    parser.add_argument('secondary', type=hostaddress_tuple, metavar='SECONDARY-ADDRESS[:PORT]', help='Hostname or IP-Address and port(Optional) where the secondary database is located')
+    args = parser.parse_args(argv)
+    logging_setup(args.verbose)
+    for key, val in args.__dict__.items():
+        if key in ('user', 'password'):
+            val = '******'
+        _logger.debug("params: %s = %r", key, val)
+    return args
+
+
+class Mssql:
+    def __init__(self, host: str, db_name: str, user: str, pwd: str, port: int = 1433, timeout: int = 0, timeout_connection: int = 60) -> None:
+        self._host = host
+        self._port = port
+        self._db_name = db_name
+        self._user = user
+        self._password = pwd
+        self._timeout = timeout
+        self._timeout_connection = timeout_connection
+        self._connection = None
+        self._cursor = None
+
+    def connect(self) -> None:
+        parameters = {
+            'server': self._host,
+            'port': str(self._port),
+            'database': self._db_name,
+            'user': self._user,
+            'password': self._password,
+            'charset': 'UTF-8',
+            'timeout': self._timeout,
+            'login_timeout': self._timeout_connection,
+        }
+        self._connection = pymssql.connect(**parameters)
+        self._cursor = self._connection.cursor()
+
+    def execute(self, query: str) -> List[Tuple[Any, ...]]:
+        self._cursor.execute(query)
+        return self._cursor.fetchall()
+
+    def disconnect(self) -> None:
+        if self._cursor:
+            self._cursor.close()
+        if self._connection:
+            self._connection.close()
+
+    def __enter__(self) -> None:
+        self.connect()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        self.disconnect()
+
+    def __del__(self) -> None:
+        self.disconnect()
+
+
+def querying(args: argparse.Namespace, database_type: DbType, mssql: Mssql) -> Tuple[List[Tuple[Any, ...]], List[Tuple[Any, ...]], List[Tuple[Any, ...]]]:
+    start_time = time.time()
+    _logger.debug(f"Starting concurrent task for the {database_type.value} database")
+
+    host_address = args.primary[0] if database_type == DbType.PRIMARY else args.secondary[0]
+    port = args.primary[1] if database_type == DbType.PRIMARY else args.secondary[1]
+
+    global _step_process
+    _step_process = f"connecting to {database_type.value} database ({host_address}:{port})"
+
+    with mssql(host_address, 'msdb', args.user, args.password, port, args.timeout, args.login_timeout) as db:
+        _step_process = f"executing SQL command on {database_type.value} database ({host_address}:{port})"
+        status_result = db.execute(QUERY[f"get_{database_type.value}_status"]['query'])
+        if not status_result:
+            raise Exception(f"{database_type.value} return a empty dataset")
+        jobs_result = db.execute(QUERY['get_jobs']['query'])
+        time_result = db.execute(QUERY['get_server_current_time']['query'])
+        current_time = time.time()
+        elapsed_time = current_time - start_time
+        _logger.debug(f"Task for the {database_type.value} database completed at {str(datetime.timedelta(seconds=elapsed_time))}")
+        return status_result, jobs_result, time_result
+
+
+def get_log_shipping_section(args: argparse.Namespace) -> str:
+    _logger.info('Starting concurrent queries')
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        task_primary = executor.submit(querying, args, DbType.PRIMARY, Mssql)
+        task_secondary = executor.submit(querying, args, DbType.SECONDARY, Mssql)
+        primary_status_result = task_primary.result()
+        secondary_status_result = task_secondary.result()
+        res = {
+            'primary': {
+                'status': map_one_result(QUERY['get_primary_status']['columns'], primary_status_result[0][0]),
+                'jobs': map_many_results(QUERY['get_jobs']['columns'], primary_status_result[1]),
+                'server_current_time': map_one_result(QUERY['get_server_current_time']['columns'], primary_status_result[2][0])
+            },
+            'secondary': {
+                'status': map_one_result(QUERY['get_secondary_status']['columns'], secondary_status_result[0][0]),
+                'jobs': map_many_results(QUERY['get_jobs']['columns'], secondary_status_result[1]),
+                'server_current_time': map_one_result(QUERY['get_server_current_time']['columns'], secondary_status_result[2][0])
+            }
+        }
+        output = json.dumps(res)
+        _logger.debug(f"Original size: {humanize_bytes(len(output.encode()))}")
+        output = zlib.compress(output.encode('utf-8'))
+        _logger.debug(f"Compressed size: {humanize_bytes(len(output))}")
+        output = base64.b64encode(output)
+        _logger.debug(f"Output size: {humanize_bytes(len(output))}")
+        return output.decode('utf-8')
+
+
+def humanize_bytes(num_bytes: int) -> str:
+    for unit in ['B', 'KB', 'MB', 'GB', 'TB', 'PB']:
+        if num_bytes < 1024:
+            return f"{num_bytes:.2f}{unit}"
+        num_bytes /= 1024
+    return f"{num_bytes:.2f}PB"
+
+
+def format_exception_message(ex: Exception) -> str:
+    def process_item(item):
+        if isinstance(item, bytes):
+            return item.decode('utf-8')
+        elif isinstance(item, (List, Tuple)):
+            return ', '.join(process_item(sub_item) for sub_item in item)
+        else:
+            return str(item)
+    errmsg = ''
+    if isinstance(ex.args, (Tuple, List)) and ex.args:
+        errmsg = ', '.join(process_item(item) for item in ex.args).strip(', ')
+    else:
+        errmsg = str(ex)
+    return errmsg.replace('\n', ' ').strip(' ')
+
+
+def main(argv: Optional[List[str]] = None) -> None:
+    args = parse_arguments(argv or sys.argv[1:])
+    try:
+        output = '<<<mssql_log_shipping>>>\n'
+        output += get_log_shipping_section(args)
+    except Exception as ex:
+        if args.debug:
+            raise
+        finalize(1, f"Error while {_step_process}: {format_exception_message(ex)}")
+    finalize(0, output)
+
+
+def finalize(exit_code: int, output: str) -> NoReturn:
+    if exit_code == 0:
+        sys.stdout.write("%s\n" % output)
+    else:
+        sys.stderr.write("%s\n" % output)
+    sys.exit(exit_code)
+
+
+if __name__ == '__main__':
+    main()
