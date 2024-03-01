@@ -39,4 +39,4 @@ jobs:
           release_name: Release ${{ github.ref }}
           draft: false
           prerelease: false
-          files: ${{ steps.cmkpkg.outputs.pkgfile }}
+          files: ${{ steps.cmkpkg.outputs.pkgpath }}

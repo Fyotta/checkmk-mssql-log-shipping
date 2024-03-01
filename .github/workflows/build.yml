@@ -35,5 +35,5 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v3
         with:
-          name: ${{ steps.cmkpkg.outputs.pkgfile }}
-          path: ${{ steps.cmkpkg.outputs.pkgfile }}
+          name: ${{ steps.cmkpkg.outputs.pkgfilename }}
+          path: ${{ steps.cmkpkg.outputs.pkgpath }}

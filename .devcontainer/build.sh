@@ -14,7 +14,8 @@ mkp inspect ./dist/$NAME-$VERSION.mkp
 
 # Set Outputs for GitHub Workflow steps
 if [ -n "$GITHUB_WORKSPACE" ]; then
-    echo "pkgfile=./dist/${NAME}-${VERSION}.mkp" >> $GITHUB_OUTPUT
+    echo "pkgpath=./dist/${NAME}-${VERSION}.mkp" >> $GITHUB_OUTPUT
+    echo "pkgfilename=${NAME}-${VERSION}.mkp" >> $GITHUB_OUTPUT
     echo "pkgname=${NAME}" >> $GITHUB_OUTPUT
     echo "pkgversion=$VERSION" >> $GITHUB_OUTPUT
 fi
