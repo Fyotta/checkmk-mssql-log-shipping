@@ -1,0 +1,34 @@
+# -*- encoding: utf-8; py-indent-offset: 4 -*-
+from cmk.base.check_api import passwordstore_get_cmdline
+from typing import Mapping, List
+from cmk.utils.type_defs import (
+    HostAddress,
+    HostName
+)
+
+
+def agent_mssql_log_shipping_arguments(params: Mapping[str, object], _hostname: HostName, _hostaddress: HostAddress) -> List[List[str]]:
+    args = []
+    keys = [
+        'user',
+        'password',
+        'timeout',
+        'login-timeout',
+    ]
+    for key in (k for k in keys if k in params):
+        option = "--%s" % key
+        value = params[key]
+        if isinstance(value, bool):
+            if value:
+                args.append(option)
+        elif key == 'password':
+            args += [passwordstore_get_cmdline("--password=%s", value)]
+        else:
+            args += [option, value]
+
+    for database_type in ['primary', 'secondary']:
+        args += [f"{params[database_type][0]}:{params[database_type][1]}"] if params[database_type][1] else [params[database_type][0]]
+    return args
+
+
+special_agent_info['mssql_log_shipping'] = agent_mssql_log_shipping_arguments  # noqa: F821
