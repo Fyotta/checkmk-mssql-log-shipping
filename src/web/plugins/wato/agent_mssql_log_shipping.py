@@ -1,4 +1,7 @@
 # -*- encoding: utf-8; py-indent-offset: 4 -*-
+# Checkmk special agent for MSSQL Log Shipping (https://github.com/Fyotta/checkmk-mssql-log-shipping) - Francisco Fernandes <franciscoyotta@gmail.com>
+# This code is distributed under the terms of the GNU General Public License, version 3 (GPLv3).
+# See the LICENSE file for details on the license terms.
 """Checkmk special agent for MSSQL Log Shipping"""
 from cmk.gui.plugins.wato.utils import IndividualOrStoredPassword
 from cmk.gui.valuespec import (
