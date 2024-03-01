@@ -11,7 +11,7 @@ import pytest
 from importlib.util import spec_from_loader, module_from_spec
 from importlib.machinery import SourceFileLoader
 
-spec = spec_from_loader('agent_mssql_log_shipping', SourceFileLoader('agent_mssql_log_shipping', 'agents/special/agent_mssql_log_shipping'))
+spec = spec_from_loader('agent_mssql_log_shipping', SourceFileLoader('agent_mssql_log_shipping', 'src/agents/special/agent_mssql_log_shipping'))
 agent_mssql_log_shipping = module_from_spec(spec)
 spec.loader.exec_module(agent_mssql_log_shipping)
 
