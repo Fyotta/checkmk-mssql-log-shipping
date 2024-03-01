@@ -1,0 +1,25 @@
+title: MSSQL Log Shipping
+agents: special
+catalog: app/mssql
+distribution:
+author: Francisco Fernandes <franciscoyotta@gmail.com>
+license: GPL
+description:
+ This check monitors the status of the MSSQL Log Shipping Replication.
+
+ The check can be configured via the corresponding WATO rules {Agent MSSQL Log Shipping} and {MSSQL Log Shipping}
+
+ {Metrics:}
+
+  {Gap:} Represents the time between the last backup log in the primary database and the last restore in the secondary database.
+
+  {Time Since Last Log Backup:} Represents the time since the last Log backup in the primary database.
+
+  {Time Since Last Restore:} Represents the time since the last restore in the secondary database.
+
+
+item:
+ The instance and database names
+
+inventory:
+ One check per pair of primary and secondary databases as configured with {Agent MSSQL Log Shipping}
