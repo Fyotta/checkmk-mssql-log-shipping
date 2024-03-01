@@ -1,8 +1,8 @@
 # Checkmk MSSQL Log Shipping
 
-![build](https://github.com/franciscofernandes2com/checkmk-mssql-logshipping/workflows/build/badge.svg)
-![flake8](https://github.com/franciscofernandes2com/checkmk-mssql-logshipping/workflows/Lint/badge.svg)
-![pytest](https://github.com/franciscofernandes2com/checkmk-mssql-logshipping/workflows/pytest/badge.svg)
+![build](https://github.com/fyotta/checkmk-mssql-log-shipping/workflows/build/badge.svg)
+![flake8](https://github.com/fyotta/checkmk-mssql-log-shipping/workflows/Lint/badge.svg)
+![pytest](https://github.com/fyotta/checkmk-mssql-log-shipping/workflows/pytest/badge.svg)
 
 ## Description
 Checkmk extension - Special agent for monitoring MSSQL Log Shipping Replication
