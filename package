@@ -1,22 +1,34 @@
 {
-    'author': u'',
-    'description': u'',
-    'download_url': '',
+    'author': u'Francisco Fernandes <franciscoyotta@gmail.com>',
+    'description': u'Checkmk special agent for MSSQL Log Shipping',
+    'download_url': 'https://github.com/fyotta/checkmk-mssql-log-shipping',
     'files': {
-        'agent_based': [],
-        'agents': [],
-        'checkman': [],
-        'checks': [],
+        'agent_based': [
+            'mssql_log_shipping.py'
+        ],
+        'agents': [
+            'special/agent_mssql_log_shipping'
+        ],
+        'checkman': [
+            'mssql_log_shipping'
+        ],
+        'checks': [
+            'agent_mssql_log_shipping'
+        ],
         'doc': [],
         'inventory': [],
         'notifications': [],
         'pnp-templates': [],
-        'web': []
+        'web': [
+            'plugins/wato/agent_mssql_log_shipping.py',
+            'plugins/wato/mssql_log_shipping.py',
+            'plugins/metrics/mssql_log_shipping.py',
+        ]
     },
-    'name': '',
-    'title': u'',
-    'version': '0.0.1',
+    'name': 'mssql_log_shipping',
+    'title': u'MSSQL Log Shipping',
+    'version': '1.0.0',
     'version.min_required': '2.0.0',
     'version.packaged': '2.2.0',
-    'version.usable_until': '2.3.0',
+    'version.usable_until': '2.0.0',
 }
