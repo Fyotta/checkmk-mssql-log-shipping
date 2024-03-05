@@ -20,8 +20,8 @@ from cmk.gui.plugins.wato import (
 
 def _item_valuespec_mssql_log_shipping():
     return TextInput(
-        title="Instance and database name",
-        help="Insert the instance and database name here"
+        title="Database name",
+        help="Insert the database name here"
     )
 
 
