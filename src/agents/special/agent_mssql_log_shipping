@@ -19,13 +19,10 @@ import zlib
 import concurrent.futures
 
 
-_step_process = ''
 _logger = logging.getLogger(__name__)
 
 
 def map_one_result(columns: Tuple, data: Tuple[Any, ...]) -> Dict:
-    global _step_process
-    _step_process = 'processing result and types'
     return {col[0]: (col[1](value) if col[1] else value) for col, value in zip(columns, data)}
 
 
@@ -210,11 +207,7 @@ def querying(args: argparse.Namespace, database_type: DbType, mssql: Mssql) -> T
     host_address = args.primary[0] if database_type == DbType.PRIMARY else args.secondary[0]
     port = args.primary[1] if database_type == DbType.PRIMARY else args.secondary[1]
 
-    global _step_process
-    _step_process = f"connecting to {database_type.value} database ({host_address}:{port})"
-
     with mssql(host_address, 'msdb', args.user, args.password, port, args.timeout, args.login_timeout) as db:
-        _step_process = f"executing SQL command on {database_type.value} database ({host_address}:{port})"
         status_result = db.execute(QUERY[f"get_{database_type.value}_status"]['query'])
         if not status_result:
             raise Exception(f"{database_type.value} return a empty dataset")
@@ -286,7 +279,7 @@ def main(argv: Optional[List[str]] = None) -> None:
     except Exception as ex:
         if args.debug:
             raise
-        finalize(1, f"Error while {_step_process}: {format_exception_message(ex)}")
+        finalize(1, f"Error: {format_exception_message(ex)}")
     finalize(0, output)
 
 
