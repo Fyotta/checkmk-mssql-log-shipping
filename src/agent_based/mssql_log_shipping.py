@@ -13,8 +13,9 @@ from .agent_based_api.v1 import (
 import zlib
 import json
 import base64
-from typing import List, Any
+from typing import List, Any, Dict
 from datetime import datetime, timezone
+from collections import Counter
 
 
 def _join_section(section: List[List[str]]) -> str:
@@ -27,17 +28,28 @@ def _decode_data(compressed_base64: str) -> str:
     return decompressed_base64.decode('utf-8')
 
 
-def parse_mssql_log_shipping(string_table: List[List[str]]) -> any:
+def parse_mssql_log_shipping(string_table: List[List[str]]) -> Dict:
     base64_data = _join_section(string_table)
     json_str = _decode_data(base64_data)
     return json.loads(json_str)
 
 
+def find_duplicates(*lists: List[List[Any]]) -> List[Any]:
+    counter = Counter([item for sublist in lists for item in sublist])
+    return [item for item, count in counter.items() if count > 1]
+
+
+def get_exclusive_database_names(primary: Dict, secondary: Dict) -> List[Any]:
+    p_databases = [status["primary_database"] for status in primary["status"]]
+    s_databases = [status["secondary_database"] for status in secondary["status"]]
+    return find_duplicates(p_databases, s_databases)
+
+
 def discover_mssql_log_shipping_plugin(section):
-    instance_name = section['primary']['status']['instance_name'] if section['primary']['status']['instance_name'] == section['secondary']['status']['instance_name'] else f"{section['primary']['status']['instance_name']}_{section['secondary']['status']['instance_name']}"
-    database_name = section['primary']['status']['primary_database'] if section['primary']['status']['primary_database'] == section['secondary']['status']['secondary_database'] else f"{section['primary']['status']['primary_database']}_{section['secondary']['status']['secondary_database']}"
-    item_name = f"{instance_name}_{database_name}"
-    yield Service(item=item_name)
+    primary_data = section.get('primary')
+    secondary_data = section.get('secondary')
+    for database in get_exclusive_database_names(primary_data, secondary_data):
+        yield Service(item=database)
 
 
 def _agregate_results(state_list: List[State], **kwargs: Any):
@@ -48,20 +60,26 @@ def _agregate_results(state_list: List[State], **kwargs: Any):
 
 
 def check_mssql_log_shipping_plugin(item, params, section):
-    primary = section.get('primary')
-    secondary = section.get('secondary')
-    if not primary or not secondary:
-        if not primary:
+    primary_data = section.get('primary')
+    secondary_data = section.get('secondary')
+    if not primary_data or not secondary_data:
+        if not primary_data:
             yield Result(state=State.CRIT, summary='Primary data not found')
-        if not secondary:
+        if not secondary_data:
             yield Result(state=State.CRIT, summary='Secondary data not found')
         return
 
-    last_backup_date_utc = datetime.fromisoformat(primary['status']['last_backup_date_utc']).replace(tzinfo=timezone.utc)
-    last_restored_date_utc = datetime.fromisoformat(secondary['status']['last_restored_date_utc']).replace(tzinfo=timezone.utc)
+    primary_status = next(filter(lambda d: d.get('primary_database') == item, primary_data['status']), None)
+    secondary_status = next(filter(lambda d: d.get('secondary_database') == item, secondary_data['status']), None)
 
-    primary_server_current_time = datetime.fromisoformat(primary['server_current_time']['server_current_time']).replace(tzinfo=timezone.utc)
-    secondary_server_current_time = datetime.fromisoformat(secondary['server_current_time']['server_current_time']).replace(tzinfo=timezone.utc)
+    if not primary_status or not secondary_status:
+        return
+
+    last_backup_date_utc = datetime.fromisoformat(primary_status['last_backup_date_utc']).replace(tzinfo=timezone.utc)
+    last_restored_date_utc = datetime.fromisoformat(secondary_status['last_restored_date_utc']).replace(tzinfo=timezone.utc)
+
+    primary_server_current_time = datetime.fromisoformat(primary_data['server_current_time']['server_current_time']).replace(tzinfo=timezone.utc)
+    secondary_server_current_time = datetime.fromisoformat(secondary_data['server_current_time']['server_current_time']).replace(tzinfo=timezone.utc)
     diff_current_time = abs(primary_server_current_time - secondary_server_current_time)
 
     diff = abs(last_restored_date_utc - last_backup_date_utc) - diff_current_time
@@ -101,7 +119,7 @@ def check_mssql_log_shipping_plugin(item, params, section):
         notice_only = True,
     )
 
-    details = f"\nLast Backup File: {primary['status']['last_backup_file']}\nLast Copied File: {secondary['status']['last_copied_file']}\nLast Restored File: {secondary['status']['last_restored_file']}"
+    details = f"\nLast Backup File: {primary_status['last_backup_file']}\nLast Copied File: {secondary_status['last_copied_file']}\nLast Restored File: {secondary_status['last_restored_file']}"
     if State.worst(*state_list) == State.OK:
         yield Result(state=State.OK, summary='Synchronized databases', details=details)
     elif State.worst(*state_list) == State.CRIT:
