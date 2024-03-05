@@ -82,7 +82,7 @@ def check_mssql_log_shipping_plugin(item, params, section):
     secondary_server_current_time = datetime.fromisoformat(secondary_data['server_current_time']['server_current_time']).replace(tzinfo=timezone.utc)
     diff_current_time = abs(primary_server_current_time - secondary_server_current_time)
 
-    diff = abs(last_restored_date_utc - last_backup_date_utc) - diff_current_time
+    diff = abs((last_restored_date_utc - last_backup_date_utc) - diff_current_time)
     diff_seconds = diff.total_seconds()
 
     time_since_last_restore = abs(datetime.now(timezone.utc) - last_restored_date_utc)
