@@ -42,7 +42,7 @@ def datetime_to_iso(dt: datetime.datetime) -> str:
     return dt.isoformat()
 
 
-VERSION = '0.0.1'
+VERSION = '1.0.0'
 DEFAULT_MSSQL_PORT = 1433
 QUERY = {
     'get_primary_status': {
@@ -228,17 +228,18 @@ def get_log_shipping_section(args: argparse.Namespace) -> str:
         secondary_status_result = task_secondary.result()
         res = {
             'primary': {
-                'status': map_one_result(QUERY['get_primary_status']['columns'], primary_status_result[0][0]),
+                'status': map_many_results(QUERY['get_primary_status']['columns'], primary_status_result[0]),
                 'jobs': map_many_results(QUERY['get_jobs']['columns'], primary_status_result[1]),
                 'server_current_time': map_one_result(QUERY['get_server_current_time']['columns'], primary_status_result[2][0])
             },
             'secondary': {
-                'status': map_one_result(QUERY['get_secondary_status']['columns'], secondary_status_result[0][0]),
+                'status': map_many_results(QUERY['get_secondary_status']['columns'], secondary_status_result[0]),
                 'jobs': map_many_results(QUERY['get_jobs']['columns'], secondary_status_result[1]),
                 'server_current_time': map_one_result(QUERY['get_server_current_time']['columns'], secondary_status_result[2][0])
             }
         }
         output = json.dumps(res)
+        _logger.debug(f"Output data:\n--- Data Start ---\n{output}\n--- Data End ---")
         _logger.debug(f"Original size: {humanize_bytes(len(output.encode()))}")
         output = zlib.compress(output.encode('utf-8'))
         _logger.debug(f"Compressed size: {humanize_bytes(len(output))}")
